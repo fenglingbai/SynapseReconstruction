@@ -4,6 +4,13 @@
 
 ## Installation
 
+``
+conda create -n your_env python=3.6
+``
+
+``
+conda install --yes --file requirements.txt
+``
 
 ## Train
 
@@ -11,10 +18,7 @@
 
 ### Change different loss
 
-## Inference
-
-## Fusion
-
+## Inference and Fusion
 
 ## Connection
 
