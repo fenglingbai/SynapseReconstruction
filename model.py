@@ -1372,6 +1372,214 @@ def rpn_bbox_loss_graph(config, target_bbox, rpn_match, rpn_bbox):
     loss = K.switch(tf.size(loss) > 0, K.mean(loss), tf.constant(0.0))
     return loss
 
+# def rpn_class_loss_graph(rpn_match, rpn_class_logits, rpn_class):
+#     """RPN anchor classifier loss.
+#
+#     rpn_match: [batch, anchors, 1]. Anchor match type. 1=positive,
+#                -1=negative, 0=neutral anchor.
+#     rpn_class_logits: [batch, anchors, 2]. RPN classifier logits for BG/FG.
+#     rpn_class: [batch, anchors, 2]. RPN classifier logits for BG/FG after softmax.
+#     """
+#     # Squeeze last dim to simplify
+#     # rpn_match = tf.squeeze(rpn_match, -1)
+#     # Get anchor classes. Convert the -1/+1 match to 0/1 values.
+#     anchor_class_positive = K.cast(K.equal(rpn_match, 1), tf.int32)
+#     anchor_class_negative = 1 - anchor_class_positive
+#     # anchor_class:[batch, anchors, 2]. Anchor match type for BG/FG.
+#     anchor_class = tf.concat([anchor_class_negative, anchor_class_positive], axis=-1)
+#     # Positive and Negative anchors contribute to the loss,
+#     # but neutral anchors (match value = 0) don't.
+#     indices = tf.where(K.not_equal(rpn_match, 0))
+#     # Pick rows that contribute to the loss and filter out the rest.
+#     rpn_class = tf.gather_nd(rpn_class, indices)
+#     anchor_class = tf.gather_nd(anchor_class, indices)
+#     # # Cross entropy loss
+#     # # keras里sparse_categorical_crossentropy和categorical_crossentropy
+#     # # 都是计算多分类crossentropy的，只是对y的格式要求不同。
+#     # # 1）如果是categorical_crossentropy，那y必须是one-hot处理过的比如[[0,1,0,1,0],[1,0,0,0,0],[0,0,1,0,1]]这种
+#     # # 2）如果是sparse_categorical_crossentropy，那y就是原始的整数形式，比如[1, 0, 2, 0, 2]这种
+#     # loss = K.sparse_categorical_crossentropy(target=anchor_class,
+#     #                                          output=rpn_class_logits,
+#     #                                          from_logits=True)
+#     ##########################################################################
+#     # https://blog.csdn.net/u011583927/article/details/90716942
+#     # tf.clip_by_value()可以将一个张量中的数值限制在一个范围之内。
+#     # （可以避免一些运算错误:可以保证在进行log运算时，不会出现log0这样的错误或者大于1的概率）
+#     epsilon = 1.e-7
+#     alpha = tf.constant(0.25, dtype=tf.float32)
+#     gamma = 2.
+#     # https: // blog.csdn.net / u011583927 / article / details / 90716942
+#     anchor_class = tf.cast(anchor_class, tf.float32)
+#     rpn_class = tf.clip_by_value(rpn_class, epsilon, 1. - epsilon)
+#     rpn_class = tf.cast(rpn_class, tf.float32)
+#
+#     alpha_t = anchor_class * alpha + (tf.ones_like(anchor_class) - anchor_class) * (1 - alpha)
+#     y_t = tf.multiply(anchor_class, rpn_class) + tf.multiply(1 - anchor_class, 1 - rpn_class)
+#     ce = -tf.log(y_t)
+#     weight = tf.pow(tf.subtract(1., y_t), gamma)
+#     fl = tf.multiply(tf.multiply(weight, ce), alpha_t)
+#     loss = tf.reduce_mean(fl)
+#
+#     ################################################################
+#
+#     loss = K.switch(tf.size(loss) > 0, K.mean(loss), tf.constant(0.0))
+#     return loss
+#
+# def bbox_ciou(boxes1, boxes2):
+#     '''
+#     计算ciou = iou - p2/c2 - av
+#     :param boxes1: [batch, anchors, (y1, x1, y2, x2)]   gt_y1x1y2x2
+#     :param boxes2: [batch, anchors, (y1, x1, y2, x2)]   pred_y1x1y2x2
+#     :return:
+#     '''
+#     # 提取变成左上角坐标、右下角坐标
+#     boxes1_y1 = boxes1[..., 0]
+#     boxes1_x1 = boxes1[..., 1]
+#     boxes1_y2 = boxes1[..., 2]
+#     boxes1_x2 = boxes1[..., 3]
+#
+#     boxes2_y1 = boxes2[..., 0]
+#     boxes2_x1 = boxes2[..., 1]
+#     boxes2_y2 = boxes2[..., 2]
+#     boxes2_x2 = boxes2[..., 3]
+#
+#     # 提取中心点与高宽
+#     boxes1_height = boxes1_y2 - boxes1_y1
+#     boxes1_width = boxes1_x2 - boxes1_x1
+#     boxes1_center_y = boxes1_y1 + 0.5 * boxes1_height
+#     boxes1_center_x = boxes1_x1 + 0.5 * boxes1_width
+#
+#     boxes2_height = boxes2_y2 - boxes2_y1
+#     boxes2_width = boxes2_x2 - boxes2_x1
+#     boxes2_center_y = boxes2_y1 + 0.5 * boxes2_height
+#     boxes2_center_x = boxes2_x1 + 0.5 * boxes2_width
+#
+#     # 计算矩形面积
+#     boxes1_area = (boxes1_y2 - boxes1_y1) * (boxes1_x2 - boxes1_x1)
+#     boxes2_area = (boxes2_y2 - boxes2_y1) * (boxes2_x2 - boxes2_x1)
+#
+#     # 计算交集的左上角坐标、右下角坐标
+#     y1 = tf.maximum(boxes1_y1, boxes2_y1)
+#     y2 = tf.minimum(boxes1_y2, boxes2_y2)
+#     x1 = tf.maximum(boxes1_x1, boxes2_x1)
+#     x2 = tf.minimum(boxes1_x2, boxes2_x2)
+#
+#     inter_area = tf.maximum(x2 - x1, 0.0) * tf.maximum(y2 - y1, 0.0)
+#
+#     union_area = boxes1_area + boxes2_area - inter_area
+#     iou = inter_area / union_area
+#
+#     # 计算并集的左上角坐标、右下角坐标
+#     enclose_y1 = tf.minimum(boxes1_y1, boxes2_y1)
+#     enclose_y2 = tf.maximum(boxes1_y2, boxes2_y2)
+#     enclose_x1 = tf.minimum(boxes1_x1, boxes2_x1)
+#     enclose_x2 = tf.maximum(boxes1_x2, boxes2_x2)
+#
+#     # 包围矩形的对角线的平方
+#     enclose_c2 = K.pow(enclose_y2 - enclose_y1, 2) + K.pow(enclose_x2 - enclose_x1, 2)
+#
+#     # 两矩形中心点距离的平方
+#     p2 = K.pow(boxes1_center_y -boxes2_center_y, 2) + K.pow(boxes1_center_x - boxes2_center_x, 2)
+#
+#     # 增加av。分母boxes2[..., 3]可能为0，所以加上除0保护防止nan。
+#     atan1 = tf.atan(boxes1_width / boxes1_height)
+#     atan2 = tf.atan(boxes2_width / (boxes2_height + 1e-6))
+#     v = 4.0 * K.pow(atan1 - atan2, 2) / (math.pi ** 2)
+#     a = v / (1 - iou + v)
+#
+#     ciou = iou - 1.0 * p2 / enclose_c2 - 1.0 * a * v
+#
+#     return ciou
+#
+#
+# def rpn_bbox_loss_graph(config, target_bbox, rpn_match, rpn_bbox, anchors):
+#     """Return the RPN bounding box loss graph.
+#
+#     config: the model config object.
+#     target_bbox: [batch, max positive anchors, (dy, dx, log(dh), log(dw))].
+#         Uses 0 padding to fill in unsed bbox deltas.
+#     rpn_match: [batch, anchors, 1]. Anchor match type. 1=positive,
+#                -1=negative, 0=neutral anchor.
+#     rpn_bbox: [batch, anchors, (dy, dx, log(dh), log(dw))]
+#     anchors: [batch, anchors, (y1, x1, y2, x2)]
+#     """
+#     # Positive anchors contribute to the loss, but negative and
+#     # neutral anchors (match value of 0 or -1) don't.
+#     # Removes a 1-dimension from the tensor at index "-1 axis".
+#     # 将rpn_match变为[batch, anchors]，每一个元素为1，0，or-1
+#     rpn_match = K.squeeze(rpn_match, -1)
+#     indices = tf.where(K.equal(rpn_match, 1))
+#
+#     # Pick bbox deltas that contribute to the loss
+#     # 根据indices取bbox，进行loss函数计算
+#     rpn_bbox = tf.gather_nd(rpn_bbox, indices)
+#     anchors = tf.gather_nd(anchors, indices)
+#
+#     # Trim target bounding box deltas to the same length as rpn_bbox.
+#     # tf.cast( ) 或者K.cast( ) 是执行 tensorflow 中的张量数据类型转换
+#     # [batch,],元素为每一个batch的正样本数量
+#     batch_counts = K.sum(K.cast(K.equal(rpn_match, 1), tf.int32), axis=1)
+#     target_bbox = batch_pack_graph(target_bbox, batch_counts,
+#                                    config.IMAGES_PER_GPU)
+#
+#     #####################################################
+#     # 针对anchor，进行gt_real_box，rpn_real_box的还原
+#     # 进行除数的还原
+#     rpn_bbox = rpn_bbox * np.reshape(config.RPN_BBOX_STD_DEV, [1, 1, 4])
+#     target_bbox = target_bbox * np.reshape(config.RPN_BBOX_STD_DEV, [1, 1, 4])
+#
+#     # # Apply deltas
+#     # 计算公式中可以看出，anchor是否归一化对iou loss没有影响
+#     # 反算real_box
+#     # center_y += deltas[:, 0] * height
+#     # center_x += deltas[:, 1] * width
+#     # height *= tf.exp(deltas[:, 2])
+#     # width *= tf.exp(deltas[:, 3])
+#     # 正则化公式
+#     # h, w = shape
+#     # shift = np.array([0, 0, 1, 1])
+#     # return np.divide((boxes - shift), np.array([h - 1, w - 1, h - 1, w - 1])).astype(np.float32)
+#     # Convert to y, x, h, w
+#     def deltas_to_bbox(deltas, boxes):
+#         height = boxes[..., 2] - boxes[..., 0]
+#         width = boxes[..., 3] - boxes[..., 1]
+#         center_y = boxes[..., 0] + 0.5 * height
+#         center_x = boxes[..., 1] + 0.5 * width
+#         # Apply deltas
+#         center_y += deltas[..., 0] * height
+#         center_x += deltas[..., 1] * width
+#         height *= tf.exp(deltas[..., 2])
+#         width *= tf.exp(deltas[..., 3])
+#         # Convert back to y1, x1, y2, x2
+#         y1 = center_y - 0.5 * height
+#         x1 = center_x - 0.5 * width
+#         y2 = y1 + height
+#         x2 = x1 + width
+#         return tf.stack([y1, x1, y2, x2], axis=-1)
+#
+#     rpn_real_box = deltas_to_bbox(rpn_bbox, anchors)
+#
+#     gt_real_box = deltas_to_bbox(target_bbox, anchors)
+#
+#     # anchor的生成在RPN阶段有两处
+#     # 数据生成器处，计算rpn_target中，anchor为未正则化
+#     # 但输入网络后，input_gt_boxes正则化为gt_boxes
+#     # 网络内生成的rpn的anchor，进行了正则化
+#     window = np.array([0, 0, 1, 1], dtype=np.float32)
+#
+#     rpn_real_box = utils.batch_slice(rpn_real_box,
+#                                      lambda x: clip_boxes_graph(x, window),
+#                                      config.IMAGES_PER_GPU,
+#                                      names=["refined_anchors_clipped"])
+#     ciou = bbox_ciou(gt_real_box, rpn_real_box)
+#
+#     loss = 1 - ciou
+#
+#     #################################################################
+#
+#     loss = K.switch(tf.size(loss) > 0, K.mean(loss), tf.constant(0.0))
+#     return loss
+
 
 def mrcnn_class_loss_graph(target_class_ids, pred_class_logits,
                            active_class_ids):
@@ -2401,6 +2609,11 @@ class MaskRCNN():
                 [input_rpn_match, rpn_class_logits])
             rpn_bbox_loss = KL.Lambda(lambda x: rpn_bbox_loss_graph(config, *x), name="rpn_bbox_loss")(
                 [input_rpn_bbox, input_rpn_match, rpn_bbox])
+            # # Losses
+            # rpn_class_loss = KL.Lambda(lambda x: rpn_class_loss_graph(*x), name="rpn_class_loss")(
+            #     [input_rpn_match, rpn_class_logits, rpn_class])
+            # rpn_bbox_loss = KL.Lambda(lambda x: rpn_bbox_loss_graph(config, *x), name="rpn_bbox_loss")(
+            #     [input_rpn_bbox, input_rpn_match, rpn_bbox, anchors])
             class_loss = KL.Lambda(lambda x: mrcnn_class_loss_graph(*x), name="mrcnn_class_loss")(
                 [target_class_ids, mrcnn_class_logits, active_class_ids])
             bbox_loss = KL.Lambda(lambda x: mrcnn_bbox_loss_graph(*x), name="mrcnn_bbox_loss")(
